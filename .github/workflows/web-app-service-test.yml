@@ -1,0 +1,41 @@
+name: Test and verify
+
+on:
+  pull_request:
+
+env:
+    DOCKER_DRIVER: overlay2
+
+jobs:
+
+  test:
+    name: Test
+    runs-on: [self-hosted, berry-backend]
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Cache node modules
+        uses: actions/cache@v2
+        with:
+          path: node_modules
+          key: ${{ runner.OS }}-build-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.OS }}-build-
+            ${{ runner.OS }}-
+
+      - name: NPM CI
+        run: npm ci
+
+      - name: Lint
+        run: |
+          npm run lint
+          npx prettier --check .
+          
+
+      - name: Test
+        run: npm run test-ci
+
+
