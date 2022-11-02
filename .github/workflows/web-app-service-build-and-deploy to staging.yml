@@ -1,0 +1,81 @@
+name: Staging build and deploy
+
+on:
+  push:
+    branches:
+      [develop]
+
+env:
+  STAGING_CONTAINER_REPOSITORY: 753727432596.dkr.ecr.eu-central-1.amazonaws.com
+  STAGING_APP_NAME: web-app-staging
+  STAGING_CLUSTER_NAME: HR-Staging
+  DOCKER_DRIVER: overlay2
+
+jobs:
+ 
+  staging_build_deploy: 
+
+   name: Staging Build and Deploy
+   runs-on: [self-hosted, berry-backend]
+  
+   steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.STAGING_AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.STAGING_AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        
+    - name: Checkout   
+      uses: actions/checkout@v2    
+          
+    - name: Cache node modules
+      uses: actions/cache@v2
+      with:
+        path: node_modules
+        key: ${{ runner.OS }}-build-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.OS }}-build-
+          ${{ runner.OS }}-
+
+    - name: NPM CI
+      run: npm ci
+
+    - name: Lint
+      run: |
+        npm run lint
+        npx prettier --check .
+          
+    - name: Test
+      run: npm run test
+
+    - name: Build
+      run: npm run build
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build . -t $STAGING_CONTAINER_REPOSITORY/$STAGING_APP_NAME:$IMAGE_TAG -t $STAGING_CONTAINER_REPOSITORY/$STAGING_APP_NAME:latest -f DockerfileStaging
+        docker push $STAGING_CONTAINER_REPOSITORY/$STAGING_APP_NAME:$IMAGE_TAG
+        docker push $STAGING_CONTAINER_REPOSITORY/$STAGING_APP_NAME:latest
+
+    # - name: Deploy to EKS
+    #   env: 
+    #     IMAGE_TAG: ${{ github.sha }}
+    #     AWS_REGION: ${{ secrets.AWS_REGION }}
+    #   run: |
+    #     curl -LO https://dl.k8s.io/release/v1.23.0/bin/linux/amd64/kubectl
+    #     chmod +x ./kubectl
+    #     mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$PATH:$HOME/bin
+    #     echo 'export PATH=$PATH:$HOME/bin' >> ~/.bashrc
+    #     kubectl version --short --client
+    #     aws eks --region $AWS_REGION update-kubeconfig --name $STAGING_CLUSTER_NAME
+    #     sed -i "s/###DockerRepositoryTag###/$STAGING_CONTAINER_REPOSITORY/g" k8s/staging/WebAppServiceStaging.yaml
+    #     sed -i "s/###DockerImageTag###/$STAGING_APP_NAME:$IMAGE_TAG/g" k8s/staging/WebAppServiceStaging.yaml
+    #     kubectl apply -f k8s/staging/WebServiceStaging.yaml
